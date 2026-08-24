@@ -3985,11 +3985,13 @@ const MODELOS_MANEJO = {
   parto_lote: {
     titulo: 'Registro de partos em lote',
     instrucoes: `<strong>Como funciona:</strong><br>
-    1. Preencha o brinco da mãe, data do parto e dados da cria (opcional)<br>
-    2. O contador de partos da mãe será incrementado automaticamente<br>
-    3. Se informar brinco da cria, ela será cadastrada como novo animal (Bezerro/Bezerra)`,
-    colunas: ['Brinco mãe','Data parto','Brinco cria','Sexo cria','Peso cria (kg)'],
-    exemplo: [['113','2026-05-15','1201','F','32'],['123','2026-05-18','','','']],
+    1. Preencha o brinco da mãe, data do parto e dados da cria<br>
+    2. <strong>Tipo de parto:</strong> Normal, Auxiliado, Cesárea, Natimorto ou Aborto<br>
+    3. O pai da cria é identificado automaticamente pela inseminação da mãe<br>
+    4. Natimorto e Aborto não geram cria ao pé; Aborto não conta como parto<br>
+    5. Use a Observação para detalhes da cria (ex: sem orelha, mancando, focinho torto)`,
+    colunas: ['Brinco mãe','Data parto','Brinco cria','Sexo cria','Peso cria (kg)','Tipo de parto','Observação'],
+    exemplo: [['113','15/05/2026','1201','F','32','Normal',''],['123','18/05/2026','','','','Natimorto','Cria nasceu morta']],
   },
 };
 
@@ -4311,30 +4313,64 @@ async function executarManejo(){
   }
 
   else if(manejoAtual === 'parto_lote'){
+    const eventoParto = 'ev_parto_' + Date.now();
     for(const row of manejoCSVData){
       const mae = (row['brinco mãe']||row['brinco mae']||'').trim();
       const dataParto = normalizarData(row['data parto']||row['data']||'') || buscarDataManejo(row);
-      if(!mae||!dataParto){erros.push({linha: '?', erro: 'Linha com brinco ou situação vazia'});continue;}
+      if(!mae||!dataParto){erros.push({linha: '?', erro: 'Linha sem brinco da mãe ou sem data de parto'});continue;}
       const animalMae = ANIMAIS.find(a=>a.id===mae);
       if(!animalMae){erros.push({linha: mae, erro: 'Animal mãe não encontrado no plantel'});continue;}
-      // Increment partos
-      const novosPartos = (animalMae.partos||0) + 1;
-      const {error:em} = await sb.from('animais').update({partos:novosPartos, cat:'Vazia com cria ao pé'}).eq('id',mae);
-      if(em){erros.push(`Brinco ${mae}: ${em.message}`);continue;}
-      // Register cria if brinco provided
+
+      // Tipo de parto e observação
+      const tipoParto = (row['tipo de parto']||row['tipo parto']||row['tipo']||'').trim();
+      const obsParto = (row['observação']||row['observacao']||row['obs']||'').trim();
+      const t = tipoParto.toLowerCase();
+      const ehAborto = t.includes('aborto');
+      const ehNatimorto = t.includes('natimorto') || t.includes('nascido morto') || t.includes('morto');
+
+      // Aborto não conta como parto; natimorto conta (gestação foi a termo)
+      const contaParto = !ehAborto;
+      const novosPartos = (animalMae.partos||0) + (contaParto ? 1 : 0);
+
       const brincoCria = (row['brinco cria']||'').trim();
-      if(brincoCria){
-        const sexoCria = (row['sexo cria']||'F').trim().toUpperCase() === 'M' ? 'M' : 'F';
-        const pesoCria = parseFloat(row['peso cria (kg)']||row['peso cria']||'') || null;
+      // Só existe "cria ao pé" se nasceu bezerro vivo
+      const criaViva = !!brincoCria && !ehAborto && !ehNatimorto;
+
+      const {error:em} = await sb.from('animais')
+        .update({partos:novosPartos, cat: criaViva ? 'Vazia com cria ao pé' : 'Vazia'})
+        .eq('id',mae);
+      if(em){erros.push({linha: mae, erro: em.message});continue;}
+
+      // Cadastra a cria (somente se nasceu viva)
+      let paiInferido = null;
+      if(criaViva){
+        const sexoCria = (row['sexo cria']||'F').trim().toUpperCase().startsWith('M') ? 'M' : 'F';
+        const pesoCria = parseFloat(String(row['peso cria (kg)']||row['peso cria']||'').replace(',','.')) || null;
+        // Identifica o pai pela inseminação Prenhe da mãe (previsão de parto ≈ nascimento)
+        paiInferido = touroDoAnimal({pai:null, mae:mae, nasc:dataParto});
         await sb.from('animais').upsert({
           id:brincoCria, nome:null, raca:animalMae.raca||'Nelore',
           sexo:sexoCria, nasc:dataParto, piquete:animalMae.piquete||null,
-          cat: sexoCria==='F'?'Bezerra':'Bezerro', mae:mae, pai:null, partos:0
+          cat: sexoCria==='F'?'Bezerra':'Bezerro', mae:mae, pai:paiInferido, partos:0,
+          obs: obsParto || null
         });
         if(pesoCria){
           await sb.from('pesagens').insert({id:`p_cria_${brincoCria}_${Date.now()}`,animal_id:brincoCria,data:dataParto,peso:pesoCria,obs:'Peso ao nascer'});
         }
       }
+
+      // Registra o parto na lista de manejos
+      const detalhes = [
+        tipoParto ? 'Tipo: '+tipoParto : '',
+        criaViva ? 'Cria: '+brincoCria : ((ehAborto||ehNatimorto) ? 'Sem cria viva' : ''),
+        paiInferido ? 'Pai: '+paiInferido : '',
+        obsParto
+      ].filter(Boolean).join(' | ');
+      await sb.from('manejos_sanitarios').insert({
+        id: eventoParto+'_'+mae, evento_id: eventoParto, animal_id: mae,
+        nome_manejo: 'Parto', data: dataParto, medicamento:'', dose:'',
+        obs: detalhes
+      });
       ok++;
     }
   }
