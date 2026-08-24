@@ -846,14 +846,29 @@ td{padding:10px;border-bottom:1px solid var(--border)}
 
     <div class="card">
       <div class="ch"><span class="ct">Safra / estação de monta analisada</span></div>
-      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
         <div><div class="fl">Exposição de</div><input class="fi" type="date" id="ix-de" onchange="renderIndices()" style="width:150px"></div>
         <div><div class="fl">Exposição até</div><input class="fi" type="date" id="ix-ate" onchange="renderIndices()" style="width:150px"></div>
-        <div><div class="fl">Rendimento carcaça (%)</div><input class="fi" type="number" id="ix-rend" value="50" onchange="renderIndices()" style="width:110px"></div>
         <button class="btn" onclick="ixUsarEstacao()">Usar estação de monta</button>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px">
-        As crias consideradas são as filhas das vacas expostas nesse período, nascidas entre 240 e 330 dias após a exposição.
+      <div style="font-size:11px;color:var(--text3);margin-bottom:14px">
+        Eficiência de cria: as crias consideradas são as filhas das vacas expostas nesse período, nascidas entre 240 e 330 dias após a exposição.
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:12px">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div><div class="fl">Ano pecuário — início</div><input class="fi" type="date" id="ix-ap-de" onchange="renderIndices()" style="width:150px"></div>
+          <div><div class="fl">Ano pecuário — fim</div><input class="fi" type="date" id="ix-ap-ate" onchange="renderIndices()" style="width:150px"></div>
+          <button class="btn" onclick="ixUsarAnoPecuario()">Usar ano pecuário configurado</button>
+        </div>
+        <div style="margin-top:12px">
+          <button class="btn btn-p" onclick="renderIndices()">&#8635; Atualizar índices</button>
+          <span id="ix-atualizado" style="font-size:11px;color:var(--text3);margin-left:8px"></span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:8px">
+          Custos e arrobas produzidas. <strong>1 @ = 30 kg de peso vivo</strong> (50% de rendimento de carcaça).
+          O ganho é medido entre a pesagem de abertura deste ano e a de abertura do ano seguinte.
+        </div>
       </div>
     </div>
 
@@ -1484,10 +1499,27 @@ function renderDash(){
   const touros=ANIMAIS.filter(a=>a.sexo==='M'&&(calcIdadeMeses(a.nasc)||0)>=24).length;
   const vacas=ANIMAIS.filter(a=>a.sexo==='F'&&(a.partos||0)>=1).length;
   const relTV=touros&&vacas?(vacas/touros).toFixed(1)+':1':'—';
+  // ARROBAS (1 @ = 30 kg de peso vivo)
+  const KG_AR = 30;
+  const pesoVivoTot = pesos.reduce((s,v)=>s+v,0);
+  const arrobasRebanho = pesoVivoTot / KG_AR;
+  const arrobaMedia = pmedio ? pmedio / KG_AR : 0;
+  // @ produzidas no ano pecuário (entre a pesagem de abertura deste ano e a do ano seguinte)
+  let arrobasProduzidas = null, animaisComparados = 0;
+  try{
+    const g = calcGanhoAnual(apInicio, apFim);
+    animaisComparados = g.comparados;
+    if(g.comparados) arrobasProduzidas = g.ganhoKg / KG_AR;
+  }catch(e){}
+
   document.getElementById('dash-metrics').innerHTML=
     mc('Total rebanho',fmtN(tot),femeas+'F + '+machos+'M')+
     mc('Fêmeas gestantes',fmtN(gestantes),pct(gestantes,femeas)+' das fêmeas',gestantes>0?'var(--green)':null)+
-    mc('Peso médio',pmedio?pmedio+' kg':'—','animais com pesagem')+
+    mc('Peso médio',pmedio?pmedio+' kg':'—',pmedio?arrobaMedia.toFixed(1)+' @ por animal':'animais com pesagem')+
+    mc('Arrobas do rebanho',pesoVivoTot?fmtN(Math.round(arrobasRebanho))+' @':'—',pesoVivoTot?fmtN(Math.round(pesoVivoTot))+' kg de peso vivo · 1@ = 30 kg':'sem pesagens')+
+    mc('@ produzidas no ano',arrobasProduzidas===null?'—':fmtN(Math.round(arrobasProduzidas))+' @',
+       arrobasProduzidas===null?'precisa das 2 pesagens anuais':animaisComparados+' animais comparados',
+       arrobasProduzidas?'var(--green)':null)+
     mc('Relação touro/vaca',relTV,touros+' touros · '+vacas+' vacas');
 
   // REPRODUÇÃO
@@ -5434,11 +5466,19 @@ function ixUsarEstacao(){
   renderIndices();
 }
 
+// Preenche o período com o ano pecuário configurado (padrão 01/07 a 30/06)
+function ixUsarAnoPecuario(){
+  const ap = anoPecuario();
+  if(ap && ap.inicio) document.getElementById('ix-ap-de').value = ap.inicio;
+  if(ap && ap.fim)    document.getElementById('ix-ap-ate').value = ap.fim;
+  renderIndices();
+}
+
 // Núcleo do cálculo: devolve os números da safra escolhida
 function calcularIndices(){
   const de  = document.getElementById('ix-de')?.value || '';
   const ate = document.getElementById('ix-ate')?.value || '';
-  const rend = (ixNum(document.getElementById('ix-rend')?.value) || 50)/100;
+  const KG_ARROBA = 30; // 1 @ = 30 kg de peso vivo (50% de rendimento de carcaça)
 
   // --- Vacas expostas: fêmeas com exposição dentro do período ---
   const expostas = new Set();
@@ -5498,14 +5538,54 @@ function calcularIndices(){
   ANIMAIS.forEach(a=>{ const p = ixNum(calcPesoAtual(a.id)); if(p) pesoVivoTotal += p; });
   const uaPorHa = haTotal ? (pesoVivoTotal/450)/haTotal : null;
 
-  return {de, ate, rend, expostas, nExpostas, criasSafra, desmamados,
+  return {de, ate, KG_ARROBA, expostas, nExpostas, criasSafra, desmamados,
           kgTotal, comPeso, semPeso, kgPorVaca, taxaDesmame, pesoMedio,
           haTotal, kgPorHa, pesoVivoTotal, uaPorHa};
 }
 
-// Custos vindos da aba Insumos, no mesmo período de referência
+// Pesagem de um animal mais próxima de uma data-âncora (janela em dias)
+function pesagemAncora(animalId, dataAlvo, janelaDias){
+  if(!dataAlvo) return null;
+  const ps = PESAGENS.filter(p=>p.animal_id===animalId && p.data && ixNum(p.peso)!==null);
+  if(!ps.length) return null;
+  let melhor=null, menor=Infinity;
+  for(const p of ps){
+    const d = Math.abs(ixDiasEntre(dataAlvo, p.data));
+    if(d < menor){ menor = d; melhor = p; }
+  }
+  return (melhor && menor <= (janelaDias||45)) ? {peso: ixNum(melhor.peso), data: melhor.data, dist: menor} : null;
+}
+
+// Ganho de peso vivo do ano pecuário.
+// O rebanho é pesado uma vez por ano (na abertura), então o ganho de um ano
+// é a diferença entre a pesagem de abertura deste ano e a do ano seguinte.
+function calcGanhoAnual(apDe, apAte){
+  const res = {ganhoKg:0, comparados:0, semAbertura:0, semFechamento:0, semNenhuma:0};
+  if(!apDe || !apAte) return res;
+  // fechamento = abertura do ano seguinte (dia seguinte ao fim do ano pecuário)
+  const fech = new Date(apAte+'T00:00:00');
+  fech.setDate(fech.getDate()+1);
+  const dataFechamento = fech.toISOString().split('T')[0];
+
+  ANIMAIS.forEach(a=>{
+    const pIni = pesagemAncora(a.id, apDe, 45);
+    const pFim = pesagemAncora(a.id, dataFechamento, 45);
+    if(pIni && pFim && pFim.data > pIni.data){
+      const g = pFim.peso - pIni.peso;
+      if(g > 0) res.ganhoKg += g;
+      res.comparados++;
+    } else if(pIni && !pFim){ res.semFechamento++; }
+    else if(!pIni && pFim){ res.semAbertura++; }
+    else { res.semNenhuma++; }
+  });
+  return res;
+}
+
+// Custos e arrobas produzidas no ano pecuário
 function calcularCustos(ix){
-  const de = ix.de, ate = ix.ate;
+  const de  = document.getElementById('ix-ap-de')?.value || '';
+  const ate = document.getElementById('ix-ap-ate')?.value || '';
+
   const noPeriodo = INSUMOS.filter(i=>{
     if(!i.data) return false;
     if(de && i.data < de) return false;
@@ -5514,33 +5594,18 @@ function calcularCustos(ix){
   });
   const total = noPeriodo.reduce((s,i)=> s + (ixNum(i.valor_total)||0), 0);
 
-  // meses do período (mínimo 1)
-  let meses = 1;
+  let meses = 12;
   if(de && ate){ meses = Math.max(1, ixDiasEntre(de,ate)/30.4); }
   const nAnimais = ANIMAIS.length;
   const rsCabMes = (nAnimais && meses) ? total / nAnimais / meses : null;
 
-  // @ produzidas: ganho de peso vivo no período × rendimento ÷ 15
-  let ganhoKg = 0;
-  if(de || ate){
-    const porAnimal = {};
-    PESAGENS.forEach(p=>{
-      if(!p.data || ixNum(p.peso)===null) return;
-      if(de && p.data < de) return;
-      if(ate && p.data > ate) return;
-      (porAnimal[p.animal_id] = porAnimal[p.animal_id] || []).push(p);
-    });
-    Object.values(porAnimal).forEach(ps=>{
-      if(ps.length < 2) return;
-      ps.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
-      const g = ixNum(ps[ps.length-1].peso) - ixNum(ps[0].peso);
-      if(g > 0) ganhoKg += g;
-    });
-  }
-  const arrobas = ganhoKg * ix.rend / 15;
+  const g = calcGanhoAnual(de, ate);
+  const arrobas = g.ganhoKg / (ix.KG_ARROBA || 30);
   const rsArroba = arrobas > 0 ? total / arrobas : null;
 
-  return {total, meses, nAnimais, rsCabMes, ganhoKg, arrobas, rsArroba, lancamentos: noPeriodo.length};
+  return {de, ate, total, meses, nAnimais, rsCabMes,
+          ganhoKg: g.ganhoKg, arrobas, rsArroba,
+          lancamentos: noPeriodo.length, ganho: g};
 }
 
 function renderIndices(){
@@ -5562,10 +5627,10 @@ function renderIndices(){
     ixCard('Lotação', ix.uaPorHa===null?'—':ixFmt(ix.uaPorHa,2)+' UA/ha', '1 UA = 450 kg');
 
   document.getElementById('ix-custo').innerHTML =
-    ixCard('R$ / cabeça / mês', cu.rsCabMes===null?'—':'R$ '+ixFmt(cu.rsCabMes,2), null, true) +
-    ixCard('R$ / @ produzida', cu.rsArroba===null?'—':'R$ '+ixFmt(cu.rsArroba,2), 'rend. carcaça '+ixFmt(ix.rend*100,0)+'%', true) +
-    ixCard('Gasto no período', 'R$ '+ixFmt(cu.total,2), cu.lancamentos+' lançamento(s)') +
-    ixCard('@ produzidas', ixFmt(cu.arrobas,1)+' @', ixFmt(cu.ganhoKg,0)+' kg de ganho');
+    ixCard('R$ / cabeça / mês', cu.rsCabMes===null?'—':'R$ '+ixFmt(cu.rsCabMes,2), ixFmt(cu.nAnimais,0)+' animais · '+ixFmt(cu.meses,1)+' meses', true) +
+    ixCard('R$ / @ produzida', cu.rsArroba===null?'—':'R$ '+ixFmt(cu.rsArroba,2), '1 @ = 30 kg de peso vivo', true) +
+    ixCard('Gasto no ano pecuário', 'R$ '+ixFmt(cu.total,2), cu.lancamentos+' lançamento(s)') +
+    ixCard('@ produzidas', ixFmt(cu.arrobas,1)+' @', ixFmt(cu.ganhoKg,0)+' kg de ganho · '+cu.ganho.comparados+' animais');
 
   const avisos = [];
   if(!ix.de && !ix.ate) avisos.push('Nenhum período selecionado — considerando <strong>todas</strong> as exposições registradas.');
@@ -5573,11 +5638,18 @@ function renderIndices(){
   if(ix.semPeso) avisos.push(`<strong>${ix.semPeso}</strong> bezerro(s) desmamado(s) sem peso de desmame — ficaram fora do total de kg.`);
   if(!ix.haTotal) avisos.push('Nenhum piquete com <strong>hectares</strong> preenchido — o índice por hectare fica indisponível.');
   if(!INSUMOS.length) avisos.push('Nenhum insumo lançado — os índices de custo dependem da aba <strong>Insumos</strong>.');
+  if(!cu.de || !cu.ate) avisos.push('Ano pecuário não selecionado — clique em <strong>Usar ano pecuário configurado</strong> para os índices de custo.');
+  else if(!cu.ganho.comparados) avisos.push('Nenhum animal tem <strong>as duas pesagens anuais</strong> (abertura deste ano e do ano seguinte), então as @ produzidas ficam zeradas. Isso é esperado até a segunda pesagem anual.');
+  else if(cu.ganho.semFechamento) avisos.push(`<strong>${cu.ganho.semFechamento}</strong> animal(is) com pesagem de abertura mas sem a de fechamento — ficaram fora das @ produzidas.`);
+
+  const carimbo = document.getElementById('ix-atualizado');
+  if(carimbo) carimbo.textContent = 'atualizado às ' + new Date().toLocaleTimeString('pt-BR');
 
   document.getElementById('ix-diag').innerHTML =
     `Vacas expostas no período: <strong>${ix.nExpostas}</strong><br>` +
     `Crias dessas vacas nascidas de 240 a 330 dias após a exposição: <strong>${ix.criasSafra.length}</strong><br>` +
     `Dessas, já desmamadas: <strong>${ix.desmamados.length}</strong> (com peso: ${ix.comPeso}, sem peso: ${ix.semPeso})<br>` +
+    `Ganho anual — animais com as duas pesagens: <strong>${cu.ganho.comparados}</strong> · só abertura: ${cu.ganho.semFechamento} · só fechamento: ${cu.ganho.semAbertura} · sem pesagem: ${cu.ganho.semNenhuma}<br>` +
     (avisos.length ? '<div style="margin-top:8px;padding:8px;background:var(--amber-bg);border-radius:6px;color:var(--amber)">&#9888; '+avisos.join('<br>&#9888; ')+'</div>' : '');
 }
 
@@ -5594,9 +5666,11 @@ function exportarIndices(){
     'Área útil (ha)': ix.haTotal.toFixed(1),
     'Kg desmamado por hectare': ix.kgPorHa===null?'':ix.kgPorHa.toFixed(1),
     'Lotação (UA/ha)': ix.uaPorHa===null?'':ix.uaPorHa.toFixed(2),
-    'Gasto no período (R$)': cu.total.toFixed(2),
+    'Ano pecuário': (cu.de||'')+' a '+(cu.ate||''),
+    'Gasto no ano pecuário (R$)': cu.total.toFixed(2),
     'R$ por cabeça por mês': cu.rsCabMes===null?'':cu.rsCabMes.toFixed(2),
-    '@ produzidas': cu.arrobas.toFixed(1),
+    'Ganho de peso vivo (kg)': cu.ganhoKg.toFixed(0),
+    '@ produzidas (1@ = 30kg)': cu.arrobas.toFixed(1),
     'R$ por @ produzida': cu.rsArroba===null?'':cu.rsArroba.toFixed(2),
   }], 'indices_agrocampos.csv');
 }
