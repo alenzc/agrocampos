@@ -251,7 +251,6 @@ td{padding:10px;border-bottom:1px solid var(--border)}
   <button class="nb" onclick="nav('lotes',this)">&#9632; Lotes</button>
   <button class="nb" onclick="nav('mapa',this)">&#9632; Mapa de Rebanho</button>
   <button class="nb" onclick="nav('indices',this)">&#9632; Índices</button>
-      <button class="nb" onclick="nav('insumos',this)">&#9632; Insumos</button>
       <button class="nb" onclick="nav('historico',this)">&#9632; Histórico</button>
   <button class="nb" onclick="nav('manejos',this)">&#9632; Manejos</button>
   <button class="nb" onclick="nav('genetica',this)">&#9632; Genética</button>
@@ -866,7 +865,7 @@ td{padding:10px;border-bottom:1px solid var(--border)}
           <span id="ix-atualizado" style="font-size:11px;color:var(--text3);margin-left:8px"></span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:8px">
-          Custos e arrobas produzidas. <strong>1 @ = 30 kg de peso vivo</strong> (50% de rendimento de carcaça).
+          Arrobas produzidas. <strong>1 @ = 30 kg de peso vivo</strong> (50% de rendimento de carcaça).
           O ganho é medido entre a pesagem de abertura deste ano e a de abertura do ano seguinte.
         </div>
       </div>
@@ -883,61 +882,14 @@ td{padding:10px;border-bottom:1px solid var(--border)}
     </div>
 
     <div class="card">
-      <div class="ch"><span class="ct">&#128176; Custos</span></div>
+      <div class="ch"><span class="ct">&#9878; Produção em arrobas</span></div>
       <div class="mg" id="ix-custo"></div>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px">
-        Calculado a partir dos lançamentos da aba Insumos.
-      </div>
+
     </div>
 
     <div class="card">
       <div class="ch"><span class="ct">&#128269; Diagnóstico do cálculo</span></div>
       <div id="ix-diag" style="font-size:12px;color:var(--text2);line-height:1.9"></div>
-    </div>
-  </div>
-
-  <!-- ===================== INSUMOS ===================== -->
-  <div id="sec-insumos" class="sec">
-    <div class="sec-header">
-      <span class="sec-title">&#129371; Insumos &amp; custos</span>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-p" onclick="abrirModalInsumo()">&#43; Lançar insumo</button>
-        <button class="btn" onclick="baixarModeloInsumos()">&#8595; Planilha modelo</button>
-        <button class="btn" onclick="exportarInsumos()">&#8595; Exportar</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ch"><span class="ct">Importar consumo em lote (.csv)</span></div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input type="file" accept=".csv" id="insumo-arquivo" class="fi" style="max-width:300px;padding:6px" onchange="previewInsumos()">
-        <button class="btn btn-s" id="btn-importar-insumos" onclick="importarInsumos()" disabled>&#9654; Importar</button>
-        <span id="insumo-status" style="font-size:12px;color:var(--text2)"></span>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px">
-        Colunas: Data; Categoria; Produto; Lote; Quantidade; Unidade; Valor total (R$); Animais; Observação
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ch"><span class="ct">Resumo por lote</span></div>
-      <div class="tw">
-        <table><thead><tr>
-          <th>Lote</th><th>Suplemento (kg)</th><th>Volumoso (kg)</th><th>Medicamentos (R$)</th><th>Total (R$)</th><th>Animais</th><th>R$/cab/mês</th>
-        </tr></thead><tbody id="tbody-insumos-lote"></tbody></table>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="ch">
-        <span class="ct">Lançamentos</span>
-        <input type="text" id="insumo-busca" placeholder="Buscar produto, lote..." oninput="renderInsumos()" style="min-width:200px">
-      </div>
-      <div class="tw">
-        <table><thead><tr>
-          <th>Data</th><th>Categoria</th><th>Produto</th><th>Lote</th><th>Qtd</th><th>Un.</th><th>Valor (R$)</th><th>Obs</th><th>Ações</th>
-        </tr></thead><tbody id="tbody-insumos"></tbody></table>
-      </div>
     </div>
   </div>
 
@@ -1141,7 +1093,7 @@ const sb = {
 };
 let USUARIO_ATUAL = null;
 
-let ANIMAIS=[], PESAGENS=[], INSEMINACOES=[], PIQUETES=[], LOTES=[], INSUMOS=[];
+let ANIMAIS=[], PESAGENS=[], INSEMINACOES=[], PIQUETES=[], LOTES=[];
 let TIPOS_MANEJO=[], MANEJOS_SANITARIOS=[];
 let CATEGORIAS=[], SITUACOES=[];
 let HISTORICO = [];
@@ -1173,10 +1125,6 @@ async function carregarTudo(){
     const ms = await sb.from('manejos_sanitarios').select('*').order('data',{ascending:false});
     MANEJOS_SANITARIOS = ms.data||[];
   } catch(e){ MANEJOS_SANITARIOS=[]; }
-  try {
-    const ins = await sb.from('insumos').select('*').order('data',{ascending:false});
-    INSUMOS = ins.data||[];
-  } catch(e){ INSUMOS=[]; }
   // Limpeza automática da lixeira (>30 dias)
   try{ limparLixeiraAntiga(); }catch(e){}
   // Load historico (if table exists)
@@ -1321,7 +1269,6 @@ function nav(id,btn){
   if(id==='inseminacoes'){preencherSelects();renderIns();}
   if(id==='piquetes')renderPiquetes();
   if(id==='indices')renderIndices();
-  if(id==='insumos')renderInsumos();
   if(id==='lotes'){renderLotes();}
   if(id==='lotes'){renderLotes();preencherSelectsLotes();}
 
@@ -5581,36 +5528,20 @@ function calcGanhoAnual(apDe, apAte){
   return res;
 }
 
-// Custos e arrobas produzidas no ano pecuário
-function calcularCustos(ix){
+// Arrobas produzidas no ano pecuário (1 @ = 30 kg de peso vivo)
+function calcularProducao(ix){
   const de  = document.getElementById('ix-ap-de')?.value || '';
   const ate = document.getElementById('ix-ap-ate')?.value || '';
-
-  const noPeriodo = INSUMOS.filter(i=>{
-    if(!i.data) return false;
-    if(de && i.data < de) return false;
-    if(ate && i.data > ate) return false;
-    return true;
-  });
-  const total = noPeriodo.reduce((s,i)=> s + (ixNum(i.valor_total)||0), 0);
-
-  let meses = 12;
-  if(de && ate){ meses = Math.max(1, ixDiasEntre(de,ate)/30.4); }
-  const nAnimais = ANIMAIS.length;
-  const rsCabMes = (nAnimais && meses) ? total / nAnimais / meses : null;
-
   const g = calcGanhoAnual(de, ate);
   const arrobas = g.ganhoKg / (ix.KG_ARROBA || 30);
-  const rsArroba = arrobas > 0 ? total / arrobas : null;
-
-  return {de, ate, total, meses, nAnimais, rsCabMes,
-          ganhoKg: g.ganhoKg, arrobas, rsArroba,
-          lancamentos: noPeriodo.length, ganho: g};
+  const ganhoMedio = g.comparados ? g.ganhoKg / g.comparados : null;
+  const arrobaPorHa = ix.haTotal ? arrobas / ix.haTotal : null;
+  return {de, ate, ganhoKg: g.ganhoKg, arrobas, ganhoMedio, arrobaPorHa, ganho: g};
 }
 
 function renderIndices(){
   const ix = calcularIndices();
-  const cu = calcularCustos(ix);
+  const pr = calcularProducao(ix);
 
   document.getElementById('ix-cria').innerHTML =
     ixCard('Kg desmamado / vaca exposta', ixFmt(ix.kgPorVaca,1)+' kg', 'principal índice de eficiência de cria', true) +
@@ -5627,20 +5558,19 @@ function renderIndices(){
     ixCard('Lotação', ix.uaPorHa===null?'—':ixFmt(ix.uaPorHa,2)+' UA/ha', '1 UA = 450 kg');
 
   document.getElementById('ix-custo').innerHTML =
-    ixCard('R$ / cabeça / mês', cu.rsCabMes===null?'—':'R$ '+ixFmt(cu.rsCabMes,2), ixFmt(cu.nAnimais,0)+' animais · '+ixFmt(cu.meses,1)+' meses', true) +
-    ixCard('R$ / @ produzida', cu.rsArroba===null?'—':'R$ '+ixFmt(cu.rsArroba,2), '1 @ = 30 kg de peso vivo', true) +
-    ixCard('Gasto no ano pecuário', 'R$ '+ixFmt(cu.total,2), cu.lancamentos+' lançamento(s)') +
-    ixCard('@ produzidas', ixFmt(cu.arrobas,1)+' @', ixFmt(cu.ganhoKg,0)+' kg de ganho · '+cu.ganho.comparados+' animais');
+    ixCard('@ produzidas no ano', ixFmt(pr.arrobas,1)+' @', '1 @ = 30 kg de peso vivo', true) +
+    ixCard('@ produzidas / hectare', pr.arrobaPorHa===null?'—':ixFmt(pr.arrobaPorHa,2)+' @/ha', ixFmt(ix.haTotal,1)+' ha úteis') +
+    ixCard('Ganho de peso vivo', ixFmt(pr.ganhoKg,0)+' kg', pr.ganho.comparados+' animais comparados') +
+    ixCard('Ganho médio por animal', pr.ganhoMedio===null?'—':ixFmt(pr.ganhoMedio,1)+' kg', pr.ganhoMedio===null?'':(pr.ganhoMedio/30).toFixed(2)+' @ por animal');
 
   const avisos = [];
   if(!ix.de && !ix.ate) avisos.push('Nenhum período selecionado — considerando <strong>todas</strong> as exposições registradas.');
   if(!ix.nExpostas) avisos.push('<strong>Nenhuma vaca exposta</strong> no período. O índice por vaca exposta depende das inseminações/exposições lançadas.');
   if(ix.semPeso) avisos.push(`<strong>${ix.semPeso}</strong> bezerro(s) desmamado(s) sem peso de desmame — ficaram fora do total de kg.`);
   if(!ix.haTotal) avisos.push('Nenhum piquete com <strong>hectares</strong> preenchido — o índice por hectare fica indisponível.');
-  if(!INSUMOS.length) avisos.push('Nenhum insumo lançado — os índices de custo dependem da aba <strong>Insumos</strong>.');
-  if(!cu.de || !cu.ate) avisos.push('Ano pecuário não selecionado — clique em <strong>Usar ano pecuário configurado</strong> para os índices de custo.');
-  else if(!cu.ganho.comparados) avisos.push('Nenhum animal tem <strong>as duas pesagens anuais</strong> (abertura deste ano e do ano seguinte), então as @ produzidas ficam zeradas. Isso é esperado até a segunda pesagem anual.');
-  else if(cu.ganho.semFechamento) avisos.push(`<strong>${cu.ganho.semFechamento}</strong> animal(is) com pesagem de abertura mas sem a de fechamento — ficaram fora das @ produzidas.`);
+  if(!pr.de || !pr.ate) avisos.push('Ano pecuário não selecionado — clique em <strong>Usar ano pecuário configurado</strong> para calcular as arrobas.');
+  else if(!pr.ganho.comparados) avisos.push('Nenhum animal tem <strong>as duas pesagens anuais</strong> (abertura deste ano e do ano seguinte), então as @ produzidas ficam zeradas. Isso é esperado até a segunda pesagem anual.');
+  else if(pr.ganho.semFechamento) avisos.push(`<strong>${pr.ganho.semFechamento}</strong> animal(is) com pesagem de abertura mas sem a de fechamento — ficaram fora das @ produzidas.`);
 
   const carimbo = document.getElementById('ix-atualizado');
   if(carimbo) carimbo.textContent = 'atualizado às ' + new Date().toLocaleTimeString('pt-BR');
@@ -5649,12 +5579,12 @@ function renderIndices(){
     `Vacas expostas no período: <strong>${ix.nExpostas}</strong><br>` +
     `Crias dessas vacas nascidas de 240 a 330 dias após a exposição: <strong>${ix.criasSafra.length}</strong><br>` +
     `Dessas, já desmamadas: <strong>${ix.desmamados.length}</strong> (com peso: ${ix.comPeso}, sem peso: ${ix.semPeso})<br>` +
-    `Ganho anual — animais com as duas pesagens: <strong>${cu.ganho.comparados}</strong> · só abertura: ${cu.ganho.semFechamento} · só fechamento: ${cu.ganho.semAbertura} · sem pesagem: ${cu.ganho.semNenhuma}<br>` +
+    `Ganho anual — animais com as duas pesagens: <strong>${pr.ganho.comparados}</strong> · só abertura: ${pr.ganho.semFechamento} · só fechamento: ${pr.ganho.semAbertura} · sem pesagem: ${pr.ganho.semNenhuma}<br>` +
     (avisos.length ? '<div style="margin-top:8px;padding:8px;background:var(--amber-bg);border-radius:6px;color:var(--amber)">&#9888; '+avisos.join('<br>&#9888; ')+'</div>' : '');
 }
 
 function exportarIndices(){
-  const ix = calcularIndices(); const cu = calcularCustos(ix);
+  const ix = calcularIndices(); const pr = calcularProducao(ix);
   exportarCSV([{
     'Período de exposição': (ix.de||'início')+' a '+(ix.ate||'hoje'),
     'Vacas expostas': ix.nExpostas,
@@ -5666,192 +5596,12 @@ function exportarIndices(){
     'Área útil (ha)': ix.haTotal.toFixed(1),
     'Kg desmamado por hectare': ix.kgPorHa===null?'':ix.kgPorHa.toFixed(1),
     'Lotação (UA/ha)': ix.uaPorHa===null?'':ix.uaPorHa.toFixed(2),
-    'Ano pecuário': (cu.de||'')+' a '+(cu.ate||''),
-    'Gasto no ano pecuário (R$)': cu.total.toFixed(2),
-    'R$ por cabeça por mês': cu.rsCabMes===null?'':cu.rsCabMes.toFixed(2),
-    'Ganho de peso vivo (kg)': cu.ganhoKg.toFixed(0),
-    '@ produzidas (1@ = 30kg)': cu.arrobas.toFixed(1),
-    'R$ por @ produzida': cu.rsArroba===null?'':cu.rsArroba.toFixed(2),
+    'Ano pecuário': (pr.de||'')+' a '+(pr.ate||''),
+    'Ganho de peso vivo (kg)': pr.ganhoKg.toFixed(0),
+    '@ produzidas (1@ = 30kg)': pr.arrobas.toFixed(1),
+    '@ produzidas por hectare': pr.arrobaPorHa===null?'':pr.arrobaPorHa.toFixed(2),
+    'Ganho médio por animal (kg)': pr.ganhoMedio===null?'':pr.ganhoMedio.toFixed(1),
   }], 'indices_agrocampos.csv');
-}
-
-// ═══════════════════════════════════════════════════════════
-// INSUMOS & CUSTOS
-// ═══════════════════════════════════════════════════════════
-let insumoCSVData = [];
-
-function abrirModalInsumo(){
-  document.getElementById('fi-data').value = new Date().toISOString().split('T')[0];
-  ['fi-produto','fi-lote','fi-qtd','fi-valor','fi-animais','fi-obs'].forEach(i=>{
-    const el=document.getElementById(i); if(el) el.value='';
-  });
-  document.getElementById('modal-insumo').style.display='flex';
-}
-
-async function salvarInsumo(){
-  const data = document.getElementById('fi-data').value;
-  const produto = document.getElementById('fi-produto').value.trim();
-  if(!data || !produto){ alert('Data e produto são obrigatórios.'); return; }
-  const reg = {
-    id: 'ins_'+Date.now(),
-    data,
-    categoria: document.getElementById('fi-categoria').value,
-    produto,
-    lote: document.getElementById('fi-lote').value.trim() || null,
-    quantidade: parseFloat(String(document.getElementById('fi-qtd').value).replace(',','.')) || null,
-    unidade: document.getElementById('fi-unidade').value,
-    valor_total: parseFloat(String(document.getElementById('fi-valor').value).replace(',','.')) || null,
-    animais: parseInt(document.getElementById('fi-animais').value) || null,
-    obs: document.getElementById('fi-obs').value.trim() || null,
-  };
-  const {error} = await sb.from('insumos').insert(reg);
-  if(error){ alert('Erro ao salvar: '+error.message+'\n\nSe a tabela ainda não existe, rode o SQL de criação da tabela insumos.'); return; }
-  fecharModal('modal-insumo');
-  await carregarTudo();
-  renderInsumos();
-}
-
-function baixarModeloInsumos(){
-  exportarCSV([
-    {'Data':'15/09/2026','Categoria':'Suplemento','Produto':'Proteinado 30%','Lote':'Novilhas 2026','Quantidade':'800','Unidade':'kg','Valor total (R$)':'3200','Animais':'40','Observação':''},
-    {'Data':'15/09/2026','Categoria':'Volumoso','Produto':'Silagem de milho','Lote':'Recria','Quantidade':'12000','Unidade':'kg','Valor total (R$)':'4800','Animais':'60','Observação':''},
-    {'Data':'20/09/2026','Categoria':'Medicamento','Produto':'Vermífugo','Lote':'Bezerros','Quantidade':'55','Unidade':'dose','Valor total (R$)':'440','Animais':'55','Observação':'Evermectina'},
-  ], 'modelo_insumos.csv');
-}
-
-function previewInsumos(){
-  const file = document.getElementById('insumo-arquivo').files[0];
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = (e)=>{
-    const txt = e.target.result.replace(/^\uFEFF/,'');
-    const linhas = txt.split(/\r?\n/).filter(l=>l.trim());
-    if(linhas.length < 2){ alert('Arquivo sem dados.'); return; }
-    const sep = linhas[0].includes(';') ? ';' : ',';
-    const header = linhas[0].split(sep).map(h=>h.trim().replace(/^"|"$/g,'').toLowerCase());
-    insumoCSVData = linhas.slice(1).map(l=>{
-      const vals = l.split(sep).map(v=>v.trim().replace(/^"|"$/g,''));
-      const o = {}; header.forEach((h,i)=> o[h] = vals[i]||''); return o;
-    });
-    document.getElementById('insumo-status').textContent = insumoCSVData.length+' linha(s) prontas para importar';
-    document.getElementById('btn-importar-insumos').disabled = false;
-  };
-  reader.readAsText(file, 'UTF-8');
-}
-
-async function importarInsumos(){
-  if(!insumoCSVData.length) return;
-  document.getElementById('btn-importar-insumos').disabled = true;
-  document.getElementById('insumo-status').textContent = 'Importando...';
-  const registros = [], erros = [];
-  insumoCSVData.forEach((row, idx)=>{
-    const data = normalizarData(row['data']||'');
-    const produto = (row['produto']||'').trim();
-    if(!data || !produto){ erros.push('Linha '+(idx+2)+': data ou produto inválido'); return; }
-    registros.push({
-      id: 'ins_'+Date.now()+'_'+idx,
-      data,
-      categoria: (row['categoria']||'Outro').trim(),
-      produto,
-      lote: (row['lote']||'').trim() || null,
-      quantidade: parseFloat(String(row['quantidade']||'').replace(',','.')) || null,
-      unidade: (row['unidade']||'').trim() || null,
-      valor_total: parseFloat(String(row['valor total (r$)']||row['valor total']||row['valor']||'').replace(',','.')) || null,
-      animais: parseInt(row['animais']||'') || null,
-      obs: (row['observação']||row['observacao']||'').trim() || null,
-    });
-  });
-  if(registros.length){
-    const {error} = await sb.from('insumos').insert(registros);
-    if(error){
-      alert('Erro ao importar: '+error.message+'\n\nSe a tabela ainda não existe, rode o SQL de criação da tabela insumos.');
-      document.getElementById('btn-importar-insumos').disabled = false;
-      document.getElementById('insumo-status').textContent = '';
-      return;
-    }
-  }
-  document.getElementById('insumo-status').textContent =
-    registros.length+' importado(s)' + (erros.length? ' · '+erros.length+' com erro' : '');
-  if(erros.length) alert('Linhas ignoradas:\n'+erros.join('\n'));
-  insumoCSVData = [];
-  document.getElementById('insumo-arquivo').value = '';
-  await carregarTudo();
-  renderInsumos();
-}
-
-async function excluirInsumo(id){
-  if(!confirm('Excluir este lançamento?')) return;
-  await sb.from('insumos').delete().eq('id', id);
-  await carregarTudo();
-  renderInsumos();
-}
-
-function renderInsumos(){
-  const q = (document.getElementById('insumo-busca')?.value||'').toLowerCase();
-
-  // --- Resumo por lote ---
-  const porLote = {};
-  INSUMOS.forEach(i=>{
-    const k = i.lote || '(sem lote)';
-    if(!porLote[k]) porLote[k] = {supl:0, vol:0, med:0, total:0, animais:0, datas:[]};
-    const g = porLote[k];
-    const qtd = ixNum(i.quantidade)||0, val = ixNum(i.valor_total)||0;
-    const cat = (i.categoria||'').toLowerCase();
-    let kg = qtd;
-    if((i.unidade||'').toLowerCase()==='ton') kg = qtd*1000;
-    if(cat.includes('suplement')) g.supl += kg;
-    else if(cat.includes('volumoso')) g.vol += kg;
-    else if(cat.includes('medicament')) g.med += val;
-    g.total += val;
-    if(ixNum(i.animais)) g.animais = Math.max(g.animais, ixNum(i.animais));
-    if(i.data) g.datas.push(i.data);
-  });
-
-  const linhasLote = Object.entries(porLote).sort((a,b)=>b[1].total-a[1].total).map(([lote,g])=>{
-    let meses = 1;
-    if(g.datas.length>1){
-      g.datas.sort();
-      meses = Math.max(1, ixDiasEntre(g.datas[0], g.datas[g.datas.length-1])/30.4);
-    }
-    const rsCabMes = (g.animais && meses) ? g.total/g.animais/meses : null;
-    return `<tr>
-      <td><strong>${lote}</strong></td>
-      <td>${ixFmt(g.supl,0)}</td>
-      <td>${ixFmt(g.vol,0)}</td>
-      <td>${ixFmt(g.med,2)}</td>
-      <td>${ixFmt(g.total,2)}</td>
-      <td>${g.animais||'—'}</td>
-      <td>${rsCabMes===null?'—':'R$ '+ixFmt(rsCabMes,2)}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('tbody-insumos-lote').innerHTML = linhasLote ||
-    '<tr><td colspan="7" style="color:var(--text3);padding:10px">Nenhum insumo lançado ainda.</td></tr>';
-
-  // --- Lançamentos ---
-  const lista = INSUMOS.filter(i=>{
-    if(!q) return true;
-    return ((i.produto||'')+' '+(i.lote||'')+' '+(i.categoria||'')+' '+(i.obs||'')).toLowerCase().includes(q);
-  });
-  document.getElementById('tbody-insumos').innerHTML = lista.length ? lista.slice(0,400).map(i=>`<tr>
-      <td>${i.data? i.data.split('-').reverse().join('/') : '—'}</td>
-      <td><span class="badge bgr">${i.categoria||'—'}</span></td>
-      <td>${i.produto||'—'}</td>
-      <td>${i.lote||'—'}</td>
-      <td>${i.quantidade!==null&&i.quantidade!==undefined?ixFmt(ixNum(i.quantidade),0):'—'}</td>
-      <td>${i.unidade||'—'}</td>
-      <td>${i.valor_total?'R$ '+ixFmt(ixNum(i.valor_total),2):'—'}</td>
-      <td>${i.obs||''}</td>
-      <td><button class="btn" style="padding:2px 7px;font-size:11px" onclick="excluirInsumo('${i.id}')">&#128465;</button></td>
-    </tr>`).join('')
-    : '<tr><td colspan="9" style="color:var(--text3);padding:10px">Nenhum lançamento encontrado.</td></tr>';
-}
-
-function exportarInsumos(){
-  exportarCSV(INSUMOS.map(i=>({
-    'Data': i.data||'', 'Categoria': i.categoria||'', 'Produto': i.produto||'',
-    'Lote': i.lote||'', 'Quantidade': i.quantidade||'', 'Unidade': i.unidade||'',
-    'Valor total (R$)': i.valor_total||'', 'Animais': i.animais||'', 'Observação': i.obs||'',
-  })), 'insumos_agrocampos.csv');
 }
 
 function exportarCSV(dados, nomeArquivo) {
@@ -6663,39 +6413,7 @@ verificarSessao();
   </div>
 </div>
 
-<div id="modal-insumo" class="overlay" style="display:none">
-    <div class="modal">
-      <h3>Lançar insumo</h3>
-      <div class="fg">
-        <div><div class="fl">Data *</div><input class="fi" type="date" id="fi-data"></div>
-        <div><div class="fl">Categoria</div>
-          <select class="fi" id="fi-categoria">
-            <option>Suplemento</option><option>Volumoso</option><option>Medicamento</option><option>Outro</option>
-          </select>
-        </div>
-      </div>
-      <div class="fg">
-        <div><div class="fl">Produto *</div><input class="fi" id="fi-produto" placeholder="ex: Proteinado 30%"></div>
-        <div><div class="fl">Lote</div><input class="fi" id="fi-lote" placeholder="ex: Novilhas 2026"></div>
-      </div>
-      <div class="fg">
-        <div><div class="fl">Quantidade</div><input class="fi" type="number" step="0.01" id="fi-qtd"></div>
-        <div><div class="fl">Unidade</div>
-          <select class="fi" id="fi-unidade"><option>kg</option><option>ton</option><option>L</option><option>sc</option><option>dose</option></select>
-        </div>
-      </div>
-      <div class="fg">
-        <div><div class="fl">Valor total (R$)</div><input class="fi" type="number" step="0.01" id="fi-valor"></div>
-        <div><div class="fl">Nº de animais</div><input class="fi" type="number" id="fi-animais"></div>
-      </div>
-      <div><div class="fl">Observação</div><input class="fi" id="fi-obs" placeholder="opcional"></div>
-      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-        <button class="btn" onclick="fecharModal('modal-insumo')">Cancelar</button>
-        <button class="btn btn-p" onclick="salvarInsumo()">Salvar</button>
-      </div>
-    </div>
-  </div>
-  <div id="modal-piquete" class="overlay" style="display:none">
+<div id="modal-piquete" class="overlay" style="display:none">
   <div class="modal">
     <h3 id="modal-piquete-titulo">Adicionar piquete / módulo</h3>
     <div class="fg">
