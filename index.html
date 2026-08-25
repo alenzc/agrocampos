@@ -520,6 +520,7 @@ td{padding:10px;border-bottom:1px solid var(--border)}
           <option value="matrizes">Ranking de Matrizes</option>
           <option value="touros">Ranking de Touros/Sêmen</option>
           <option value="combinacoes">Melhores Combinações</option>
+          <option value="pareado">Touros nas mesmas vacas</option>
         </select>
         <input type="text" id="gen-busca" placeholder="Buscar matriz, touro..." oninput="renderGenetica()" style="min-width:180px">
         <select id="gen-classif" onchange="renderGenetica()">
@@ -2207,6 +2208,91 @@ function classificacaoP205(p205, media, desvio){
   return {label:'Média', cor:'ba'};
 }
 
+// ═══════════════════════════════════════════════════════════════
+// GRUPO DE CONTEMPORÂNEOS (GC)
+// Compara cada bezerro apenas com os que nasceram no mesmo
+// ano pecuário e são do mesmo sexo. Remove o efeito de ano
+// (rebanho melhorando) e o efeito de sexo (macho pesa mais).
+// ═══════════════════════════════════════════════════════════════
+
+// Safra do bezerro: ano pecuário de nascimento (1 jul – 30 jun)
+function safraDe(nasc){
+  if(!nasc) return null;
+  const d = new Date(nasc+'T00:00:00');
+  const ano = d.getFullYear();
+  const inicioJulho = d.getMonth() >= 6; // mês 6 = julho
+  const a = inicioJulho ? ano : ano-1;
+  return a+'/'+String(a+1).slice(2);
+}
+
+// Enriquece os bezerros com safra, GC e desvio dentro do GC
+function aplicarGrupoContemporaneos(bezerros){
+  bezerros.forEach(b=>{
+    b.safra = safraDe(b.animal.nasc);
+    b.sexo  = b.animal.sexo || '?';
+    b.gc    = (b.safra||'?') + ' · ' + (b.sexo==='M'?'Machos':'Fêmeas');
+  });
+  // média de cada grupo
+  const grupos = {};
+  bezerros.forEach(b=>{
+    (grupos[b.gc] = grupos[b.gc] || []).push(b.p205);
+  });
+  const mediaGC = {};
+  Object.entries(grupos).forEach(([k,v])=>{
+    mediaGC[k] = v.reduce((s,x)=>s+x,0)/v.length;
+  });
+  // desvio de cada bezerro em relação ao seu grupo
+  bezerros.forEach(b=>{
+    b.nGC = grupos[b.gc].length;
+    b.mediaGC = mediaGC[b.gc];
+    // grupos com 1 só animal não permitem comparação: desvio indefinido
+    b.desvioGC = b.nGC >= 2 ? (b.p205 - b.mediaGC) : null;
+  });
+  return {bezerros, grupos, mediaGC};
+}
+
+// Confiabilidade: encolhe o desvio de touros com poucos filhos em direção a zero.
+// Um touro com 1 filho não pode valer o mesmo que um com 20.
+const K_CONFIABILIDADE = 4;
+function indiceAjustado(desvioMedio, n){
+  return desvioMedio * (n / (n + K_CONFIABILIDADE));
+}
+
+// Comparação pareada: touros que cobriram as MESMAS vacas.
+// É a comparação mais limpa possível, porque elimina o efeito da mãe.
+function compararTourosPareado(bezerros){
+  // agrupa por mãe -> touro -> desvios
+  const porMae = {};
+  bezerros.forEach(b=>{
+    if(!b.mae || !b.touro || b.desvioGC===null) return;
+    porMae[b.mae] = porMae[b.mae] || {};
+    (porMae[b.mae][b.touro] = porMae[b.mae][b.touro] || []).push(b.desvioGC);
+  });
+
+  // para cada par de touros, junta as diferenças dentro da mesma vaca
+  const pares = {};
+  Object.entries(porMae).forEach(([mae, porTouro])=>{
+    const touros = Object.keys(porTouro);
+    if(touros.length < 2) return;
+    for(let i=0;i<touros.length;i++){
+      for(let j=i+1;j<touros.length;j++){
+        const [t1,t2] = [touros[i], touros[j]].sort();
+        const m1 = porTouro[t1].reduce((s,v)=>s+v,0)/porTouro[t1].length;
+        const m2 = porTouro[t2].reduce((s,v)=>s+v,0)/porTouro[t2].length;
+        const chave = t1+' ||| '+t2;
+        pares[chave] = pares[chave] || {t1, t2, difs:[], maes:[]};
+        pares[chave].difs.push(m1 - m2);
+        pares[chave].maes.push(mae);
+      }
+    }
+  });
+
+  return Object.values(pares).map(p=>{
+    const media = p.difs.reduce((s,v)=>s+v,0)/p.difs.length;
+    return {t1:p.t1, t2:p.t2, nVacas:p.difs.length, dif:media, maes:p.maes};
+  }).sort((a,b)=>b.nVacas-a.nVacas);
+}
+
 function renderGenetica(){
   const visao = document.getElementById('gen-visao').value;
 
@@ -2244,8 +2330,12 @@ function renderGenetica(){
     <div class="mc" style="flex:1;min-width:120px"><div class="mc-l">Desvio padrão</div><div class="mc-v">±${Math.round(desvio)} kg</div></div>
   `;
 
+  // Aplica grupo de contemporâneos (safra + sexo) a todos os bezerros
+  aplicarGrupoContemporaneos(bezerros);
+
   if(visao==='matrizes') renderRankingMatrizes(bezerros, mediaGeral, desvio);
   else if(visao==='touros') renderRankingTouros(bezerros, mediaGeral, desvio);
+  else if(visao==='pareado') renderComparacaoPareada(bezerros);
   else renderCombinacoes(bezerros);
   setTimeout(()=>tornarTabelaOrdenavel('tbody-genetica'),50);
 }
@@ -2291,33 +2381,92 @@ function renderRankingMatrizes(bezerros, mediaGeral, desvio){
 }
 
 function renderRankingTouros(bezerros, mediaGeral, desvio){
-  document.getElementById('gen-titulo').textContent = 'Ranking de Touros/Sêmen';
+  document.getElementById('gen-titulo').textContent = 'Ranking de Touros (ajustado por safra e sexo)';
+  const busca = (document.getElementById('gen-busca')?.value||'').toLowerCase();
+
   const grupos = {};
   bezerros.forEach(b=>{
     if(!b.touro) return;
-    if(!grupos[b.touro]) grupos[b.touro] = {touro:b.touro, p205s:[]};
-    grupos[b.touro].p205s.push(b.p205);
+    const g = grupos[b.touro] = grupos[b.touro] || {touro:b.touro, p205s:[], desvios:[], safras:{}, semGC:0};
+    g.p205s.push(b.p205);
+    if(b.desvioGC===null){ g.semGC++; }
+    else {
+      g.desvios.push(b.desvioGC);
+      (g.safras[b.safra] = g.safras[b.safra] || []).push(b.desvioGC);
+    }
   });
-  const lista = Object.values(grupos).map(g=>{
-    const media = g.p205s.reduce((s,v)=>s+v,0)/g.p205s.length;
-    return {touro:g.touro, n:g.p205s.length, media:Math.round(media)};
-  }).sort((a,b)=>b.media-a.media);
+
+  let lista = Object.values(grupos).map(g=>{
+    const bruto = g.p205s.reduce((s,v)=>s+v,0)/g.p205s.length;
+    const nComp = g.desvios.length;
+    const desvioMedio = nComp ? g.desvios.reduce((s,v)=>s+v,0)/nComp : null;
+    const indice = desvioMedio===null ? null : indiceAjustado(desvioMedio, nComp);
+    const anos = Object.keys(g.safras).sort();
+    return {touro:g.touro, n:g.p205s.length, nComp, bruto:Math.round(bruto),
+            desvioMedio, indice, anos, safras:g.safras, semGC:g.semGC};
+  });
+
+  if(busca) lista = lista.filter(t=>t.touro.toLowerCase().includes(busca));
+
+  // Ordena pelo índice ajustado; touros sem comparação vão para o fim
+  lista.sort((a,b)=>{
+    if(a.indice===null && b.indice===null) return b.bruto-a.bruto;
+    if(a.indice===null) return 1;
+    if(b.indice===null) return -1;
+    return b.indice-a.indice;
+  });
 
   document.getElementById('thead-genetica').innerHTML =
-    '<tr><th>#</th><th>Touro / Sêmen</th><th>Nº filhos</th><th>P205 médio</th><th>vs. média</th><th>Classificação</th></tr>';
+    '<tr><th>#</th><th>Touro / Sêmen</th><th>Filhos</th><th>Safras</th>' +
+    '<th>P205 bruto</th><th>Desvio no grupo</th><th>Índice ajustado</th><th>Confiabilidade</th></tr>';
+
   document.getElementById('tbody-genetica').innerHTML = lista.length ? lista.map((t,idx)=>{
-    const cls = classificacaoP205(t.media, mediaGeral, desvio);
-    const diff = Math.round(t.media - mediaGeral);
+    const conf = t.nComp===0 ? {txt:'sem comparação', cor:'bgr'}
+               : t.nComp<3   ? {txt:'baixa ('+t.nComp+' filhos)', cor:'br'}
+               : t.nComp<8   ? {txt:'média ('+t.nComp+' filhos)', cor:'ba'}
+               :               {txt:'boa ('+t.nComp+' filhos)', cor:'bg'};
+    const umaSafra = t.anos.length===1;
+    const corInd = t.indice===null ? 'var(--text3)' : (t.indice>=0?'var(--green)':'var(--red)');
+    const fmtSinal = (v)=> (v>=0?'+':'')+Math.round(v)+' kg';
     return `<tr>
       <td>${idx+1}</td>
-      <td><strong>${t.touro}</strong></td>
+      <td><strong>${t.touro}</strong>${umaSafra?' <span title="Filhos em uma única safra: a comparação com touros de outras safras é frágil" style="color:var(--amber)">&#9888;</span>':''}</td>
       <td>${t.n}</td>
-      <td><strong>${t.media} kg</strong></td>
-      <td style="color:${diff>=0?'var(--green)':'var(--red)'}">${diff>=0?'+':''}${diff} kg</td>
-      <td><span class="badge ${cls.cor}">${cls.label}</span></td>
+      <td>${t.anos.length ? t.anos.join(', ') : '—'}</td>
+      <td>${t.bruto} kg</td>
+      <td style="color:${t.desvioMedio===null?'var(--text3)':(t.desvioMedio>=0?'var(--green)':'var(--red)')}">${t.desvioMedio===null?'—':fmtSinal(t.desvioMedio)}</td>
+      <td style="color:${corInd};font-weight:700">${t.indice===null?'—':fmtSinal(t.indice)}</td>
+      <td><span class="badge ${conf.cor}">${conf.txt}</span></td>
     </tr>`;
-  }).join('') : '<tr><td colspan="6" class="empty">Nenhum touro com filhos avaliados. Verifique se as inseminações estão vinculadas.</td></tr>';
-  document.getElementById('gen-info').textContent = `${lista.length} touros/sêmen`;
+  }).join('') : '<tr><td colspan="8" class="empty">Nenhum touro com filhos avaliados. Verifique se as inseminações estão vinculadas.</td></tr>';
+
+  const soUmaSafra = lista.filter(t=>t.anos.length===1 && t.nComp>0).length;
+  document.getElementById('gen-info').innerHTML = `${lista.length} touros` +
+    (soUmaSafra ? ` · <span style="color:var(--amber)">&#9888; ${soUmaSafra} com filhos em uma única safra</span>` : '');
+}
+
+function renderComparacaoPareada(bezerros){
+  document.getElementById('gen-titulo').textContent = 'Touros comparados nas mesmas vacas';
+  const pares = compararTourosPareado(bezerros);
+  const busca = (document.getElementById('gen-busca')?.value||'').toLowerCase();
+  const lista = busca ? pares.filter(p=>(p.t1+' '+p.t2).toLowerCase().includes(busca)) : pares;
+
+  document.getElementById('thead-genetica').innerHTML =
+    '<tr><th>Touro A</th><th>Touro B</th><th>Vacas em comum</th><th>Diferença (A − B)</th><th>Melhor</th></tr>';
+
+  document.getElementById('tbody-genetica').innerHTML = lista.length ? lista.map(p=>{
+    const melhor = Math.abs(p.dif) < 1 ? 'empate' : (p.dif>0 ? p.t1 : p.t2);
+    const forca = p.nVacas>=5 ? 'bg' : p.nVacas>=3 ? 'ba' : 'br';
+    return `<tr>
+      <td><strong>${p.t1}</strong></td>
+      <td><strong>${p.t2}</strong></td>
+      <td><span class="badge ${forca}">${p.nVacas}</span></td>
+      <td style="color:${p.dif>=0?'var(--green)':'var(--red)'};font-weight:700">${p.dif>=0?'+':''}${Math.round(p.dif)} kg</td>
+      <td>${melhor==='empate' ? '<span class="badge bgr">empate</span>' : '<span class="badge bg">'+melhor+'</span>'}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="5" class="empty">Nenhuma vaca teve filhos de dois touros diferentes ainda. Este quadro se preenche conforme você usar touros diferentes nas mesmas matrizes.</td></tr>';
+
+  document.getElementById('gen-info').textContent = `${lista.length} par(es) de touros comparáveis`;
 }
 
 function renderCombinacoes(bezerros){
