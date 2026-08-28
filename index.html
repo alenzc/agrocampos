@@ -2293,6 +2293,30 @@ function compararTourosPareado(bezerros){
   }).sort((a,b)=>b.nVacas-a.nVacas);
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PROTEÇÃO CONTRA BRINCO DUPLICADO
+// O brinco é a chave do animal. Gravar por cima destrói o
+// histórico do animal antigo, então qualquer cadastro precisa
+// checar antes se o número já existe no plantel.
+// ═══════════════════════════════════════════════════════════════
+function brincoExistente(brinco){
+  if(!brinco) return null;
+  const alvo = String(brinco).trim().toLowerCase();
+  return ANIMAIS.find(a => String(a.id).trim().toLowerCase() === alvo) || null;
+}
+
+// Descrição curta do animal, para mensagens de erro
+function resumoAnimal(a){
+  if(!a) return '';
+  const partes = [];
+  if(a.sexo) partes.push(a.sexo==='F'?'fêmea':'macho');
+  if(a.nasc) partes.push('nasc. '+a.nasc.split('-').reverse().join('/'));
+  if(a.cat) partes.push(a.cat);
+  if(a.piquete) partes.push('piquete '+a.piquete);
+  return partes.join(' · ');
+}
+
+
 function renderGenetica(){
   const visao = document.getElementById('gen-visao').value;
 
@@ -4572,6 +4596,7 @@ async function executarManejo(){
 
   else if(manejoAtual === 'parto_lote'){
     const eventoParto = 'ev_parto_' + Date.now();
+    const _brincosDesteLote = new Set();
     for(const row of manejoCSVData){
       const mae = (row['brinco mãe']||row['brinco mae']||'').trim();
       const dataParto = normalizarData(row['data parto']||row['data']||'') || buscarDataManejo(row);
@@ -4602,11 +4627,22 @@ async function executarManejo(){
       // Cadastra a cria (somente se nasceu viva)
       let paiInferido = null;
       if(criaViva){
+        // Nunca sobrescrever um animal existente
+        const jaExiste = brincoExistente(brincoCria);
+        if(jaExiste){
+          erros.push({linha: mae, erro: `Brinco "${brincoCria}" já existe no plantel (${resumoAnimal(jaExiste)}). A cria NÃO foi cadastrada — escolha outro número.`});
+          continue;
+        }
+        if(_brincosDesteLote.has(String(brincoCria).trim().toLowerCase())){
+          erros.push({linha: mae, erro: `Brinco "${brincoCria}" está repetido dentro da própria planilha. A cria NÃO foi cadastrada.`});
+          continue;
+        }
+        _brincosDesteLote.add(String(brincoCria).trim().toLowerCase());
         const sexoCria = (row['sexo cria']||'F').trim().toUpperCase().startsWith('M') ? 'M' : 'F';
         const pesoCria = parseFloat(String(row['peso cria (kg)']||row['peso cria']||'').replace(',','.')) || null;
         // Identifica o pai pela inseminação Prenhe da mãe (previsão de parto ≈ nascimento)
         paiInferido = touroDoAnimal({pai:null, mae:mae, nasc:dataParto});
-        await sb.from('animais').upsert({
+        await sb.from('animais').insert({
           id:brincoCria, nome:null, raca:animalMae.raca||'Nelore',
           sexo:sexoCria, nasc:dataParto, piquete:animalMae.piquete||null,
           cat: sexoCria==='F'?'Bezerra':'Bezerro', mae:mae, pai:paiInferido, partos:0,
@@ -5276,10 +5312,26 @@ function processarImportacao() {
     document.getElementById('imp-preview').textContent = `${dados.length} registros encontrados. Importando...`;
     let ok = 0, erros = 0;
     if (tipoImportacao === 'animais') {
+      const _vistos = new Set();
+      let duplicados = 0;
       for (const d of dados) {
-        const brinco = (d['brinco'] || d['id animal'] || d['id']).trim();
+        const brinco = (d['brinco'] || d['id animal'] || d['id'] || '').trim();
         if (!brinco) continue;
-        const { error } = await sb.from('animais').upsert({
+        const chave = brinco.toLowerCase();
+        // NUNCA sobrescrever animal existente
+        const jaExiste = brincoExistente(brinco);
+        if (jaExiste) {
+          duplicados++;
+          document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px;margin-top:4px">&#9888; Brinco <strong>${brinco}</strong> já existe no plantel (${resumoAnimal(jaExiste)}) — linha ignorada, nada foi sobrescrito.</div>`;
+          continue;
+        }
+        if (_vistos.has(chave)) {
+          duplicados++;
+          document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px;margin-top:4px">&#9888; Brinco <strong>${brinco}</strong> aparece mais de uma vez na planilha — linha ignorada.</div>`;
+          continue;
+        }
+        _vistos.add(chave);
+        const { error } = await sb.from('animais').insert({
           id: brinco,
           nome: d['nome'] || null,
           raca: d['raça'] || d['raca'] || 'Nelore',
@@ -5291,11 +5343,14 @@ function processarImportacao() {
         });
         if(error){
           erros++;
-          document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px;margin-top:4px">❌ Brinco ${brinco}: ${error.message}</div>`;
+          const dup = error.code==='23505' || /duplicate|already exists/i.test(error.message||'');
+          document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px;margin-top:4px">&#10060; Brinco ${brinco}: ${dup?'já cadastrado no sistema':error.message}</div>`;
         } else {
           ok++;
-          if(jaExiste) document.getElementById('imp-preview').innerHTML += `<div style="color:var(--amber);font-size:11px">⚠️ Brinco ${brinco}: dados atualizados (já existia)</div>`;
         }
+      }
+      if(duplicados){
+        document.getElementById('imp-preview').innerHTML += `<div style="margin-top:8px;padding:8px;background:var(--amber-bg);color:var(--amber);border-radius:6px;font-size:12px"><strong>${duplicados} linha(s) ignorada(s)</strong> por brinco duplicado. Nenhum animal existente foi alterado.</div>`;
       }
     } else if (tipoImportacao === 'pesagens') {
       for (const d of dados) {
