@@ -4417,13 +4417,29 @@ async function executarManejo(){
   else if(manejoAtual === 'pesagem_lote'){
     const pesagens = [];
     let _idxPesagem = 0;
+    const _vistosPes = new Map();   // brinco+data já lançados nesta planilha
     for(const row of manejoCSVData){
       const brinco = (row['brinco']||'').trim();
-      const peso = parseFloat(row['peso (kg)']||row['peso']||'');
+      const peso = parseFloat(String(row['peso (kg)']||row['peso']||'').replace(',','.'));
       const data = buscarDataManejo(row) || new Date().toISOString().split('T')[0];
       if(!brinco||!peso){erros.push({linha: brinco||'?', erro: 'Brinco ou peso inválido — verifique se a coluna "Peso (kg)" está preenchida'});continue;}
-      const animal = ANIMAIS.find(a=>a.id===brinco);
+      const animal = brincoExistente(brinco);
       if(!animal){erros.push({linha: brinco, erro: 'Animal não encontrado no plantel'});continue;}
+
+      // Mesmo brinco repetido dentro da própria planilha
+      const chaveLinha = brinco.toLowerCase()+'|'+data;
+      if(_vistosPes.has(chaveLinha)){
+        erros.push({linha: brinco, erro: `Brinco repetido na planilha (já aparece com ${_vistosPes.get(chaveLinha)} kg em ${data.split('-').reverse().join('/')}). Esta linha foi ignorada.`});
+        continue;
+      }
+      _vistosPes.set(chaveLinha, peso);
+
+      // Já existe pesagem deste animal nesta mesma data (planilha reimportada?)
+      const jaPesado = PESAGENS.find(p=>String(p.animal_id)===String(animal.id) && p.data===data);
+      if(jaPesado){
+        erros.push({linha: brinco, erro: `Já existe pesagem de ${jaPesado.peso} kg em ${data.split('-').reverse().join('/')}. Linha ignorada para não duplicar — exclua o evento no Histórico se quiser relançar.`});
+        continue;
+      }
       // ID à prova de colisão: brinco + data + timestamp + índice sequencial + aleatório
       _idxPesagem++;
       const idUnico = `p_lot_${brinco}_${data}_${Date.now()}_${_idxPesagem}_${Math.random().toString(36).slice(2,7)}`;
@@ -5370,18 +5386,47 @@ function processarImportacao() {
         document.getElementById('imp-preview').innerHTML += `<div style="margin-top:8px;padding:8px;background:var(--amber-bg);color:var(--amber);border-radius:6px;font-size:12px"><strong>${duplicados} linha(s) ignorada(s)</strong> por brinco duplicado. Nenhum animal existente foi alterado.</div>`;
       }
     } else if (tipoImportacao === 'pesagens') {
+      const _vistosImp = new Map();
+      let repetidas = 0;
+      const av = (txt,cor)=>{ document.getElementById('imp-preview').innerHTML += `<div style="color:var(--${cor});font-size:11px">${txt}</div>`; };
       for (const d of dados) {
         const aid = (d['brinco'] || d['id animal'] || '').trim();
         const dataRaw = d['data (aaaa-mm-dd)'] || d['data'];
         const data = normalizarData(dataRaw);
-        const peso = parseFloat(d['peso (kg)'] || d['peso']);
-        if (!aid) { erros++; document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px">❌ Linha sem brinco</div>`; continue; }
-        if (!data) { erros++; document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px">❌ Brinco ${aid}: data inválida ("${dataRaw||''}") — use DD/MM/AAAA ou AAAA-MM-DD</div>`; continue; }
-        if (!peso) { erros++; document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px">❌ Brinco ${aid}: peso inválido</div>`; continue; }
-        const { error } = await sb.from('pesagens').upsert({
-          id: `p_imp_${aid}_${data}`, animal_id: aid, data, peso, obs: d['observação'] || d['obs'] || 'Importado'
+        const peso = parseFloat(String(d['peso (kg)'] || d['peso'] || '').replace(',','.'));
+        if (!aid) { erros++; av('&#10060; Linha sem brinco','red'); continue; }
+        if (!data) { erros++; av(`&#10060; Brinco ${aid}: data inválida ("${dataRaw||''}") — use DD/MM/AAAA ou AAAA-MM-DD`,'red'); continue; }
+        if (!peso) { erros++; av(`&#10060; Brinco ${aid}: peso inválido`,'red'); continue; }
+
+        // O animal precisa existir no plantel
+        const animalPes = brincoExistente(aid);
+        if (!animalPes) { erros++; av(`&#10060; Brinco <strong>${aid}</strong>: animal não encontrado no plantel — pesagem ignorada`,'red'); continue; }
+
+        // Repetido dentro da própria planilha
+        const chaveImp = aid.toLowerCase()+'|'+data;
+        if (_vistosImp.has(chaveImp)) {
+          repetidas++;
+          av(`&#9888; Brinco <strong>${aid}</strong> aparece mais de uma vez para ${data.split('-').reverse().join('/')} — linha ignorada`,'red');
+          continue;
+        }
+        _vistosImp.set(chaveImp, peso);
+
+        // Já existe pesagem nessa data (planilha reimportada)
+        const jaTem = PESAGENS.find(p=>String(p.animal_id)===String(animalPes.id) && p.data===data);
+        if (jaTem) {
+          repetidas++;
+          av(`&#9888; Brinco <strong>${aid}</strong>: já existe pesagem de ${jaTem.peso} kg em ${data.split('-').reverse().join('/')} — linha ignorada`,'red');
+          continue;
+        }
+
+        const { error } = await sb.from('pesagens').insert({
+          id: `p_imp_${aid}_${data}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+          animal_id: animalPes.id, data, peso, obs: d['observação'] || d['obs'] || 'Importado'
         });
-        if(error){ erros++; document.getElementById('imp-preview').innerHTML += `<div style="color:var(--red);font-size:11px">❌ Brinco ${aid}: ${error.message}</div>`; } else ok++;
+        if(error){ erros++; av(`&#10060; Brinco ${aid}: ${error.message}`,'red'); } else ok++;
+      }
+      if(repetidas){
+        document.getElementById('imp-preview').innerHTML += `<div style="margin-top:8px;padding:8px;background:var(--amber-bg);color:var(--amber);border-radius:6px;font-size:12px"><strong>${repetidas} pesagem(ns) ignorada(s)</strong> por estarem repetidas (mesmo animal e mesma data). Nada foi sobrescrito.</div>`;
       }
     } else if (tipoImportacao === 'inseminacoes') {
       for (const d of dados) {
