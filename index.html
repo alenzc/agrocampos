@@ -1033,11 +1033,20 @@ const sb = {
       async insert(rows){
         const body = Array.isArray(rows)?rows:[rows];
         try {
+          // Sem 'ignore-duplicates': chave repetida PRECISA retornar erro,
+          // senão o cadastro falha em silêncio e o usuário não percebe.
           const r = await fetch(SUPABASE_URL+'/rest/v1/'+_t, {
-            method:'POST', headers:{..._headers(),'Prefer':'resolution=ignore-duplicates'},
+            method:'POST', headers:_headers(),
             body:JSON.stringify(body)
           });
-          if(!r.ok){ const d=await r.json(); return {data:null,error:{message:JSON.stringify(d)}}; }
+          if(!r.ok){
+            let d={};
+            try{ d = await r.json(); }catch(_){}
+            return {data:null, error:{
+              code: d.code || (r.status===409 ? '23505' : String(r.status)),
+              message: d.message || d.details || JSON.stringify(d) || ('HTTP '+r.status)
+            }};
+          }
           return {data:body, error:null};
         } catch(e){ return {data:null,error:{message:e.message}}; }
       },
@@ -1915,6 +1924,13 @@ function preencherSelects(){
 async function salvarAnimal(){
   const id=document.getElementById('f-brinco').value.trim();
   if(!id){alert('Brinco é obrigatório.');return;}
+
+  // Trava antes de ir ao banco: brinco é a identidade do animal
+  const duplicado = brincoExistente(id);
+  if(duplicado){
+    alert(`❌ O brinco "${id}" já está em uso.\n\nAnimal existente: ${resumoAnimal(duplicado)}\n\nEscolha outro número. Para alterar os dados desse animal, use o botão ✏️ Editar na lista.`);
+    return;
+  }
   const maeVal = document.getElementById('f-mae').value.trim()||null;
   const nascVal = document.getElementById('f-nasc').value||null;
   let paiVal = document.getElementById('f-pai').value.trim()||null;
@@ -1939,10 +1955,11 @@ async function salvarAnimal(){
     partos:parseInt(document.getElementById('f-partos').value)||0,
   });
   if(error){
-    if(error.code==='23505' || error.message.includes('duplicate') || error.message.includes('already exists')){
+    const msgErro = String(error.message||'');
+    if(error.code==='23505' || /duplicate|already exists|conflict/i.test(msgErro)){
       alert(`❌ Erro: O brinco "${id}" já está cadastrado no sistema.\n\nSe quiser atualizar os dados deste animal, use o botão ✏️ Editar na lista de animais.`);
     } else {
-      alert('❌ Erro ao cadastrar: ' + error.message);
+      alert('❌ Erro ao cadastrar: ' + msgErro);
     }
     return;
   }
