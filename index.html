@@ -2334,6 +2334,55 @@ function resumoAnimal(a){
 }
 
 
+// ═══════════════════════════════════════════════════════════════
+// VACA + CRIA AO PÉ ANDAM JUNTAS
+// Separar a mãe do bezerro antes do desmame é erro grave de manejo.
+// Toda movimentação (piquete ou lote) leva a cria junto.
+// ═══════════════════════════════════════════════════════════════
+const MESES_CRIA_AO_PE = 10; // acima disso não é mais considerado cria mamando
+
+// Mãe de um animal, incluindo a dedução pelo próprio brinco (1144.B -> 1144)
+function maeVinculada(animal){
+  const direta = maeDoAnimal(animal);
+  if(direta) return direta;
+  const m = String(animal.id||'').match(/^(.+)\.b$/i);
+  return m ? m[1].trim() : null;
+}
+
+// Crias ainda mamando de uma determinada mãe
+function criasAoPeDe(brincoMae){
+  if(!brincoMae) return [];
+  const alvo = String(brincoMae).trim().toLowerCase();
+  return ANIMAIS.filter(b=>{
+    if(b.data_desmame) return false;                 // já desmamado
+    if((b.partos||0) > 0) return false;              // já é matriz
+    const m = calcIdadeMeses(b.nasc);
+    if(m===null || m > MESES_CRIA_AO_PE) return false;
+    const mae = maeVinculada(b);
+    return mae && String(mae).trim().toLowerCase() === alvo;
+  });
+}
+
+// Mãe de um bezerro que ainda mama (null se já desmamou ou não achou)
+function maeAmamentandoDe(animal){
+  if(!animal || animal.data_desmame) return null;
+  const m = calcIdadeMeses(animal.nasc);
+  if(m===null || m > MESES_CRIA_AO_PE) return null;
+  const maeId = maeVinculada(animal);
+  if(!maeId) return null;
+  return brincoExistente(maeId);
+}
+
+// Move a mãe e leva as crias junto. Devolve a lista de crias movidas.
+async function moverComCrias(brincoMae, campos){
+  const crias = criasAoPeDe(brincoMae);
+  for(const c of crias){
+    await sb.from('animais').update(campos).eq('id', c.id);
+  }
+  return crias.map(c=>c.id);
+}
+
+
 function renderGenetica(){
   const visao = document.getElementById('gen-visao').value;
 
@@ -2600,12 +2649,40 @@ async function aplicarAcaoMassaLote(){
   if(novaSituacao) resumo.push(`situação → ${novaSituacao}`);
   if(novoLote) resumo.push(`lote → ${novoLote==='__sem__'?'sem lote':LOTES.find(l=>l.id===novoLote)?.nome}`);
 
-  if(!confirm(`Aplicar a ${animais.length} animais do lote "${lote.nome}":\n${resumo.join('\n')}\n\nConfirmar?`)) return;
+  // Crias ao pé que estão FORA do lote mas cujas mães serão movidas
+  const moveLocal = !!(novoPiquete || novoLote);
+  const idsNoLote = new Set(animais.map(a=>a.id));
+  let criasFora = [];
+  if(moveLocal){
+    animais.forEach(a=>{
+      criasAoPeDe(a.id).forEach(c=>{
+        if(!idsNoLote.has(c.id) && !criasFora.some(x=>x.id===c.id)) criasFora.push(c);
+      });
+    });
+  }
+
+  let msg = `Aplicar a ${animais.length} animais do lote "${lote.nome}":\n${resumo.join('\n')}`;
+  if(criasFora.length){
+    msg += `\n\n${criasFora.length} cria(s) ao pé (${criasFora.map(c=>c.id).join(', ')}) serão movidas junto com as mães.`;
+  }
+  if(!confirm(msg+`\n\nConfirmar?`)) return;
 
   let ok=0;
   for(const a of animais){
     const {error} = await sb.from('animais').update(updates).eq('id', a.id);
     if(!error) ok++;
+  }
+
+  // Leva as crias ao pé junto (só piquete/lote; situação é da mãe)
+  let okCrias=0;
+  if(criasFora.length){
+    const camposCria = {};
+    if(novoPiquete) camposCria.piquete = novoPiquete;
+    if(novoLote) camposCria.lote = (novoLote==='__sem__') ? null : novoLote;
+    for(const c of criasFora){
+      const {error} = await sb.from('animais').update(camposCria).eq('id', c.id);
+      if(!error) okCrias++;
+    }
   }
   await registrarAudit('acao_massa_lote','animais',id,{lote:lote.nome, alteracoes:updates, animais:ok});
   fecharModal('modal-massa-lote');
@@ -2618,7 +2695,7 @@ async function aplicarAcaoMassaLote(){
   } else {
     renderLoteDetalhe();
   }
-  alert(`✓ Alterações aplicadas a ${ok} animais.`);
+  alert(`✓ Alterações aplicadas a ${ok} animais.` + (okCrias?`\n+ ${okCrias} cria(s) ao pé movida(s) junto com as mães.`:''));
 }
 
 
@@ -4558,6 +4635,17 @@ async function executarManejo(){
       if(!piqExiste){erros.push({linha: brinco, erro: `Piquete "${piquete}" não cadastrado. Piquetes disponíveis: ${PIQUETES.map(p=>p.nome).join(', ')}`});continue;}
       const {error} = await sb.from('animais').update({piquete:piqExiste.nome}).eq('id',brinco);
       if(error){erros.push({linha: brinco, erro: error.message});continue;}
+
+      // A cria ao pé acompanha a mãe
+      const criasMovidas = await moverComCrias(brinco, {piquete:piqExiste.nome});
+      if(criasMovidas.length){
+        erros.push({linha: brinco, erro: `&#8505; Cria(s) ao pé movida(s) junto: ${criasMovidas.join(', ')}`});
+      }
+      // Se for um bezerro mamando sendo movido sozinho, avisa
+      const maeDele = maeAmamentandoDe(animal);
+      if(maeDele && maeDele.piquete !== piqExiste.nome && !manejoCSVData.some(r=>(r['brinco']||'').trim()===maeDele.id)){
+        erros.push({linha: brinco, erro: `&#9888; Bezerro ainda mamando: a mãe ${maeDele.id} continua no piquete "${maeDele.piquete||'—'}". Confira se é isso mesmo.`});
+      }
       ok++;
     }
   }
@@ -5275,8 +5363,48 @@ async function salvarEdicaoAnimal() {
     lote: document.getElementById('ea-lote').value || null,
     obs: document.getElementById('ea-obs').value.trim() || null,
   };
+  // ===== VACA + CRIA AO PÉ =====
+  const animalAtual = brincoExistente(id);
+  const mudouPiquete = animalAtual && (updates.piquete||'') !== (animalAtual.piquete||'');
+  const mudouLote    = animalAtual && (updates.lote||null) !== (animalAtual.lote||null);
+  let levarCrias = false;
+  let criasParaMover = [];
+
+  if (animalAtual && (mudouPiquete || mudouLote)) {
+    criasParaMover = criasAoPeDe(id);
+    if (criasParaMover.length) {
+      const destino = mudouPiquete ? `piquete "${updates.piquete||'—'}"` : 'novo lote';
+      levarCrias = confirm(
+        `Esta matriz tem cria ao pé: ${criasParaMover.map(c=>c.id).join(', ')}.\n\n` +
+        `Mover a(s) cria(s) junto para o ${destino}?\n\n` +
+        `OK = move mãe e cria juntas (recomendado)\n` +
+        `Cancelar = move somente a mãe, separando do bezerro`
+      );
+    }
+    // Bezerro mamando sendo movido sozinho
+    const maeDele = maeAmamentandoDe(animalAtual);
+    if (maeDele) {
+      const ok = confirm(
+        `Este bezerro ainda mama e a mãe é ${maeDele.id} (piquete "${maeDele.piquete||'—'}").\n\n` +
+        `Mover somente o bezerro, separando da mãe?\n\n` +
+        `OK = mover assim mesmo\nCancelar = manter como está`
+      );
+      if (!ok) return;
+    }
+  }
+
   const { error } = await sb.from('animais').update(updates).eq('id', id);
   if (error) { alert('Erro ao salvar: ' + error.message); return; }
+
+  if (levarCrias && criasParaMover.length) {
+    const campos = {};
+    if (mudouPiquete) campos.piquete = updates.piquete;
+    if (mudouLote)    campos.lote    = updates.lote;
+    for (const c of criasParaMover) {
+      await sb.from('animais').update(campos).eq('id', c.id);
+    }
+  }
+
   // Registrar novo peso se informado
   const novoPeso = parseFloat(document.getElementById('ea-peso').value);
   if (novoPeso) {
