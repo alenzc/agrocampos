@@ -2383,6 +2383,14 @@ async function moverComCrias(brincoMae, campos){
 }
 
 
+// Nome legível de um lote a partir do id (cai no id se o lote foi excluído)
+function nomeLote(loteId, vazio){
+  if(!loteId) return vazio!==undefined ? vazio : '';
+  const l = LOTES.find(x=>String(x.id)===String(loteId));
+  return (l && l.nome) ? l.nome : loteId;
+}
+
+
 function renderGenetica(){
   const visao = document.getElementById('gen-visao').value;
 
@@ -2729,7 +2737,7 @@ function verAnimaisPiquete(nome){
       <td>${peso?peso+' kg':'—'}</td>
       <td><span class="badge ${catBadgeL[cat]||'bgr'}">${cat}</span></td>
       <td>${a.cat||'—'}</td>
-      <td>${a.lote?(LOTES.find(l=>l.id===a.lote)?.nome||'—'):'—'}</td>
+      <td>${nomeLote(a.lote,'—')||'—'}</td>
     </tr>`;
   }).join('') : '<tr><td colspan="8" class="empty">Nenhum animal neste piquete.</td></tr>';
 
@@ -2746,7 +2754,7 @@ function exportarAnimaisPiquete(){
     'Nascimento': a.nasc||'', 'Idade': calcIdade(a.nasc),
     'Peso (kg)': calcPesoAtual(a.id)||'',
     'Categoria': categoriaAuto(a), 'Situação': a.cat||'',
-    'Lote': a.lote?(LOTES.find(l=>l.id===a.lote)?.nome||''):'',
+    'Lote': nomeLote(a.lote),
     'Observação': a.obs||'',
   }));
   exportarCSV(dados, `animais_piquete_${piqueteVisualizandoNome.replace(/[^a-z0-9]/gi,'_')}.csv`);
@@ -5031,7 +5039,7 @@ function renderMapa() {
   const grupos = {};
   ANIMAIS.forEach(a => {
     const piq = a.piquete || 'Sem Piquete';
-    const lote = (a.lote) || 'Sem Lote';
+    const lote = nomeLote(a.lote, 'Sem Lote');
     const key = piq + '|||' + lote;
     if (!grupos[key]) grupos[key] = { piq, lote, M: [0,0,0,0,0], F: [0,0,0,0,0], total: 0 };
     const fi = idxFaixa(a.nasc, a.sexo);
@@ -6062,7 +6070,7 @@ function exportarAnimais() {
     'Dias desde último parto': (()=>{ const up=ultimoPartoDe(a); return up?Math.round((new Date()-new Date(up))/86400000):''; })(),
     'Pai': a.pai || '',
     'Mãe': a.mae || '',
-    'Lote': a.lote ? (LOTES.find(l=>l.id===a.lote)?.nome || a.lote) : '',
+    'Lote': nomeLote(a.lote),
     'Observação': a.obs || '',
   }));
   exportarCSV(dados, 'animais_agrocampos.csv');
