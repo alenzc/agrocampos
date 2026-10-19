@@ -6038,16 +6038,30 @@ function calcGMDAnimal(animalId){
 }
 
 
-// Data do último parto de uma vaca: nascimento mais recente entre os filhos dela.
-// Usa o campo ultimo_parto se preenchido; senão, deriva dos filhos (vínculo mãe ou .B).
+// Data do último parto de uma vaca.
+// Compara o campo gravado com o nascimento do filho mais recente e devolve
+// a data MAIS NOVA — o campo sozinho envelhece a cada parto novo.
 function ultimoPartoDe(animal){
-  if(animal.ultimo_parto) return animal.ultimo_parto;
+  if(!animal || !animal.id) return null;
+  const alvo = String(animal.id).trim().toLowerCase();
+
+  // Filhos: vínculo pelo campo mãe, pelo brinco_anterior ou pelo padrão .B
   const filhos = ANIMAIS.filter(x=>{
-    const m = x.mae || (x.brinco_anterior?x.brinco_anterior.replace(/\.b$/i,''):null) || (x.id&&x.id.match(/^(.+)\.b$/i)?x.id.replace(/\.b$/i,''):null);
-    return m===animal.id;
+    if(String(x.id).trim().toLowerCase() === alvo) return false; // nunca é filho de si mesma
+    let m = x.mae ? String(x.mae) : null;
+    if(!m && x.brinco_anterior && /\.b$/i.test(x.brinco_anterior)) m = x.brinco_anterior.replace(/\.b$/i,'');
+    if(!m && x.id && /\.b$/i.test(x.id)) m = String(x.id).replace(/\.b$/i,'');
+    return m && m.trim().toLowerCase() === alvo;
   });
-  const datas = filhos.map(f=>f.nasc).filter(Boolean).sort();
-  return datas.length ? datas[datas.length-1] : null;
+  const datasFilhos = filhos.map(f=>f.nasc).filter(Boolean).sort();
+  const porFilho = datasFilhos.length ? datasFilhos[datasFilhos.length-1] : null;
+
+  // Campo gravado — descartado quando é igual ao nascimento da própria vaca
+  let gravado = animal.ultimo_parto || null;
+  if(gravado && animal.nasc && gravado === animal.nasc) gravado = null;
+
+  if(porFilho && gravado) return porFilho > gravado ? porFilho : gravado;
+  return porFilho || gravado || null;
 }
 
 function exportarAnimais() {
